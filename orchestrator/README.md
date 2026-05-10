@@ -176,6 +176,45 @@ how we verify parity.
 | Ticket fails repeatedly               | Inspect `failed/<id>.stderr` and `logs/`; revise + redrop |
 | Worktree left dirty after merge       | `git worktree remove orchestrator/worktrees/<ticket>`     |
 
+## Skills and sub-agents
+
+The orchestrator is layered. Below the worker fleet sit:
+
+- **`skills/<name>/SKILL.md`** — declarative knowledge loaded into the
+  orchestrator's (or a worker's) context on demand via the Skill tool.
+  Each skill encodes recipes, conventions, and quality gates for one
+  pipeline phase. Current set:
+
+  | Skill                            | Owns                                       |
+  |----------------------------------|--------------------------------------------|
+  | `blender-character-director`     | Brief, phase ordering, dispatch decisions  |
+  | `blender-cli-asset-builder`      | Headless `.py` script structure + CLI invariant |
+  | `blender-mcp-conductor`          | When to use which `mcp__blender__*` tool   |
+  | `dark-fantasy-costume-modeler`   | L2 shape language, layer hierarchy         |
+  | `blender-shader-builder`         | PBR recipes (skin/steel/gold/cloth/hair/gem) |
+  | `blender-hair-stylist`           | Curves vs cards, dark-fantasy hair grooming |
+  | `blender-render-director`        | Lighting, AgX, camera, compositor          |
+  | `blender-rig-pose-director`      | Rigify, contrapposto preset, cape/skirt    |
+  | `character-topology-reviewer`    | 10-gate retopo checklist                   |
+  | `ai-3d-mesh-handler`             | Rodin/Hunyuan import + MANIFEST.csv        |
+  | `character-export-validator`     | glTF/FBX/USD pre-/post-export gates        |
+
+- **`.claude/agents/<name>.md`** — Claude Code sub-agents with scoped
+  toolsets. They get a fresh context window per invocation and run their
+  own multi-step work. Current set:
+
+  | Sub-agent                  | Tools                                            | Use for                                          |
+  |----------------------------|--------------------------------------------------|--------------------------------------------------|
+  | `blender-mcp-operator`     | mcp__blender__*, Read, Edit, Write, Bash, Skill  | Drives live Blender; holds `blender-mcp.lock`    |
+  | `blender-script-author`    | Read, Edit, Write, Bash, Skill, Grep, Glob       | Authors/runs tracked headless `.py`              |
+  | `dark-fantasy-art-critic`  | Read, Glob, Grep, WebFetch, Skill                | Read-only render critique with PASS/FAIL gates   |
+  | `ai-mesh-importer`         | mcp__blender__generate_*, mcp__blender__import_*, Bash, Skill | End-to-end concept→AI mesh→tracked import        |
+  | `topology-rigging-gate`    | Read, Bash, Skill                                | Pre-rigging hard gate, headless bmesh checks     |
+
+Sub-agents are addressable from the orchestrator via the `Agent` tool with
+`subagent_type` set to the agent's name. Skills are addressable from inside
+any agent (orchestrator or sub-agent) via the `Skill` tool.
+
 ## Conventions referenced by ticket prompts
 
 - Object naming: lowercase with spaces, scoped prefix (`left pauldron spike`).
