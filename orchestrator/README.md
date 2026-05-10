@@ -177,8 +177,9 @@ how we verify parity.
 | Orchestrator (Claude) restarts        | Read this file + `MEMORY.md` + `orchestrator/bin/status.sh` |
 | Worker crashes mid-task               | `flock` releases on process death; `scan-stale.sh` flags |
 | Blender process dies                  | Restart in window 1; reconnect MCP socket manually        |
-| Ticket fails repeatedly               | Inspect `failed/<id>.stderr` and `logs/`; revise + redrop |
-| Worktree left dirty after merge       | `git worktree remove orchestrator/worktrees/<ticket>`     |
+| Ticket fails repeatedly               | Inspect `failed/<id>.stderr` and `logs/`; `retry-ticket.sh <id>` to reset and redispatch |
+| Worktree left dirty after a non-merge | `retry-ticket.sh <id>` drops the worktree as part of reset |
+| Worktree's work is good — land it     | `merge-worktree.sh <id>` squash-merges into main and tears down |
 
 ## Skills and sub-agents
 
