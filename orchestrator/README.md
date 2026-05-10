@@ -31,6 +31,10 @@ orchestrator/
 │   ├── status.sh                  # print queue + worker + lock state
 │   ├── spawn-worker.sh            # create a tmux worker window
 │   ├── bootstrap-tmux.sh          # create the darkfantasy tmux session
+│   ├── configure-pipeline.sh      # interactively edit workers.conf REMAP table
+│   ├── clean-ticket.sh            # strip runtime frontmatter from a ticket
+│   ├── retry-ticket.sh            # done/failed -> pending; drop worktree+branch
+│   ├── merge-worktree.sh          # squash-merge a ticket branch into main
 │   ├── scan-stale.sh              # find orphaned in_progress tickets (>30min old)
 │   └── lock-status.sh             # who holds blender-mcp.lock
 ├── templates/

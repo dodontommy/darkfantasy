@@ -20,6 +20,7 @@ finished_at: 20260510T060537Z
 duration_s: 135
 exit_code: 0
 failure_reason: nonzero_exit_1
+merged_into_main: 7f420c856096ad791f33b48749682a7afc6b6be9
 ---
 
 # Task
