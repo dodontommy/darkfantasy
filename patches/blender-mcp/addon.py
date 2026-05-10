@@ -366,34 +366,60 @@ class BlenderMCPServer:
 
     def get_viewport_screenshot(self, max_size=800, filepath=None, format="png"):
         """
-        Capture a screenshot of the current 3D viewport and save it to the specified path.
+        Capture a screenshot of the current 3D viewport.
+
+        PATCH (darkfantasy): if `filepath` is omitted, the addon writes the
+        screenshot to its own local temp path, reads the bytes, base64-encodes
+        them, returns `data_b64` in the response, and deletes the temp file.
+        This makes the tool work when the MCP server is on a different host
+        from the Blender process (over SSH tunnel). The old filepath path is
+        kept for backward compatibility with the upstream MCP server.
 
         Parameters:
-        - max_size: Maximum size in pixels for the largest dimension of the image
-        - filepath: Path where to save the screenshot file
-        - format: Image format (png, jpg, etc.)
+        - max_size: max dimension in pixels
+        - filepath: optional; if provided, addon also leaves the file there
+        - format: png | jpg
 
-        Returns success/error status
+        Returns either {"success": True, "data_b64": "..."} (cross-host) or
+        {"success": True, "filepath": "..."} (legacy).
         """
-        try:
-            if not filepath:
-                return {"error": "No filepath provided"}
+        import base64
+        import tempfile as _tempfile
 
-            # Find the active 3D viewport
+        # Decide where to write. If caller didn't provide a path or provided
+        # one that isn't on this host's filesystem, generate a local temp.
+        return_bytes = False
+        if not filepath:
+            tmp = _tempfile.NamedTemporaryFile(
+                suffix=f".{format.lower()}", prefix="blender_mcp_shot_", delete=False
+            )
+            filepath = tmp.name
+            tmp.close()
+            return_bytes = True
+        else:
+            parent = osp.dirname(filepath) or "."
+            if not osp.isdir(parent):
+                # Caller's path doesn't exist on this host — fall back to
+                # local temp and return bytes.
+                tmp = _tempfile.NamedTemporaryFile(
+                    suffix=f".{format.lower()}", prefix="blender_mcp_shot_", delete=False
+                )
+                filepath = tmp.name
+                tmp.close()
+                return_bytes = True
+
+        try:
             area = None
             for a in bpy.context.screen.areas:
                 if a.type == 'VIEW_3D':
                     area = a
                     break
-
             if not area:
                 return {"error": "No 3D viewport found"}
 
-            # Take screenshot with proper context override
             with bpy.context.temp_override(area=area):
                 bpy.ops.screen.screenshot_area(filepath=filepath)
 
-            # Load and resize if needed
             img = bpy.data.images.load(filepath)
             width, height = img.size
 
@@ -402,21 +428,30 @@ class BlenderMCPServer:
                 new_width = int(width * scale)
                 new_height = int(height * scale)
                 img.scale(new_width, new_height)
-
-                # Set format and save
                 img.file_format = format.upper()
                 img.save()
                 width, height = new_width, new_height
 
-            # Cleanup Blender image data
             bpy.data.images.remove(img)
 
-            return {
+            response = {
                 "success": True,
                 "width": width,
                 "height": height,
-                "filepath": filepath
+                "filepath": filepath,
             }
+
+            if return_bytes:
+                try:
+                    with open(filepath, "rb") as f:
+                        response["data_b64"] = base64.b64encode(f.read()).decode("ascii")
+                finally:
+                    try:
+                        os.remove(filepath)
+                    except OSError:
+                        pass
+
+            return response
 
         except Exception as e:
             return {"error": str(e)}

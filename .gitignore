@@ -32,3 +32,6 @@ __pycache__/
 # Tool caches
 .uv/
 .venv/
+build/
+dist/
+*.egg-info/

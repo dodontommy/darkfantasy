@@ -1,11 +1,47 @@
-# Installing the patched blender-mcp addon
+# Installing the patched blender-mcp
 
-This addon is required on whichever Blender process will host the MCP socket
-(GUI Blender — typically on a workstation, often Windows).
+This patched copy of `ahujasid/blender-mcp` lives in
+`/home/dodontommy/darkfantasy/patches/blender-mcp/` and is a full installable
+package. There are two halves — the **MCP server** (Python, runs on the
+machine that hosts your AI client) and the **addon** (Python, runs inside
+Blender). Both are patched; both should be installed for the cross-host
+features to work end-to-end.
 
-## Windows (Blender 4.5 LTS)
+## 1. MCP server (Linux, this repo's host)
 
-In PowerShell:
+The four MCP client configs in this project already point at the patched
+package via `uvx --from`. Nothing to install — the first invocation triggers
+`uv` to build and cache the package. Verify with:
+
+```bash
+uvx --from /home/dodontommy/darkfantasy/patches/blender-mcp blender-mcp --help
+```
+
+If you change MCP client configs by hand, use this server entry:
+
+```json
+{
+  "mcpServers": {
+    "blender": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "/home/dodontommy/darkfantasy/patches/blender-mcp",
+        "blender-mcp"
+      ],
+      "env": {
+        "DISABLE_TELEMETRY": "true"
+      }
+    }
+  }
+}
+```
+
+After editing client configs, restart the AI client to reload them.
+
+## 2. Addon (Blender 4.5 LTS — Windows in our setup)
+
+In PowerShell on the Windows machine that runs Blender:
 
 ```powershell
 $dst = "$env:APPDATA\Blender Foundation\Blender\4.5\scripts\addons"
@@ -15,10 +51,14 @@ Invoke-WebRequest `
   -OutFile "$dst\addon.py"
 ```
 
-Then in Blender 4.5: `Edit → Preferences → Add-ons` → search "MCP" → enable
-**Interface: Blender MCP**.
+Then in Blender 4.5: `Edit → Preferences → Add-ons` → search "MCP" →
+**disable** if previously enabled, then **enable** again so the new file
+loads. In the BlenderMCP sidebar (`N` key), click "Connect to MCP server".
 
-## Linux
+You will see a new **Host** field above the Port field. Default `127.0.0.1`
+keeps localhost-only behavior.
+
+### Linux / macOS addon install
 
 ```bash
 mkdir -p ~/.config/blender/4.5/scripts/addons
@@ -26,39 +66,60 @@ cp /home/dodontommy/darkfantasy/patches/blender-mcp/addon.py \
    ~/.config/blender/4.5/scripts/addons/addon.py
 ```
 
-(For 4.0 substitute `4.0`.)
-
-## macOS
-
 ```bash
 mkdir -p "$HOME/Library/Application Support/Blender/4.5/scripts/addons"
 cp .../patches/blender-mcp/addon.py \
    "$HOME/Library/Application Support/Blender/4.5/scripts/addons/addon.py"
 ```
 
-## What changes vs. upstream
+## 3. Cross-host bridge (Windows Blender ↔ Linux MCP server)
 
-A new **Host** field appears above the Port field in the BlenderMCP sidebar.
-- Default `127.0.0.1` keeps original behavior (localhost only).
-- Set to `0.0.0.0` to accept LAN connections (combine with `socat` on the
-  MCP-server side or with Tailscale for zero-config LAN).
+If Blender is on Windows and the MCP server is on Linux, you need a TCP
+bridge. Easiest: SSH reverse tunnel from Windows.
 
-You can also seed the host/port via environment variables before launching
-Blender — useful for non-interactive setups:
-
-```bash
-BLENDER_MCP_HOST=0.0.0.0 BLENDER_MCP_PORT=9876 blender
+```powershell
+ssh -N -R 9876:127.0.0.1:9876 dodontommy@100.68.127.104
 ```
 
-## Updating
+**Use `127.0.0.1` explicitly, not `localhost`.** On Windows, `localhost`
+often resolves to `::1` (IPv6) first, but the addon binds IPv4 only —
+the SSH client opens the wrong socket and traffic silently fails.
 
-Re-run the install command. The addon is a single file; copy overwrites.
+Verify from Linux:
 
-## Connection patterns supported
+```bash
+nc -z localhost 9876 && echo bridge up
+python3 -c "
+import json, socket
+s = socket.socket(); s.settimeout(8); s.connect(('localhost', 9876))
+s.sendall(json.dumps({'type':'get_polyhaven_status','params':{}}).encode())
+print(s.recv(4096)[:200])
+"
+```
 
-| Pattern                      | Addon Host  | Server target              | Notes                                      |
-|------------------------------|-------------|----------------------------|--------------------------------------------|
-| Local same-machine (default) | `127.0.0.1` | `localhost`                | No setup. Works out of the box.            |
-| SSH reverse tunnel           | `127.0.0.1` | `localhost` (tunneled)     | `ssh -R 9876:localhost:9876` from addon host. No addon patch needed for this — included for completeness. |
-| Tailscale + socat on server  | `0.0.0.0`   | `localhost` (socat-bridged)| `socat TCP-LISTEN:9876,bind=127.0.0.1,fork TCP:<TAILSCALE_IP_OF_ADDON_HOST>:9876` on the server side. |
-| Direct LAN (insecure)        | `0.0.0.0`   | `<addon_host_ip>:9876`     | Requires patching the MCP server too — not done yet. |
+If you get JSON back, the bridge is fully alive. If you get 0 bytes, the
+addon side is unreachable — usually the IPv4 trap above, or the Blender
+addon hasn't been re-enabled after the patch install, or there are stacked
+SSH tunnels racing for the bind on the Linux side.
+
+## 4. Updating
+
+Re-pull the addon with the same `Invoke-WebRequest` command, then
+disable+enable the addon in Blender to reload the file.
+
+The MCP server auto-rebuilds whenever `pyproject.toml` version bumps; if
+you only edited `.py` files without bumping version, run:
+
+```bash
+uvx --refresh --from /home/dodontommy/darkfantasy/patches/blender-mcp blender-mcp
+```
+
+## Troubleshooting
+
+| Symptom                                              | Likely cause                          | Fix                                      |
+|------------------------------------------------------|---------------------------------------|------------------------------------------|
+| `nc -z` succeeds but raw probe gets 0 bytes          | IPv4/IPv6 trap on Windows             | Use `127.0.0.1` in the `ssh -R` command  |
+| "Screenshot file was not created"                    | Old addon installed; new server needs new addon | Re-pull `addon.py`, disable+enable in Blender |
+| Multiple SSH tunnel windows open                     | Race for Linux:9876 bind              | Close all; open ONE                       |
+| Bridge dies after a while                            | Idle timeout                          | Add `ServerAliveInterval 60` to ssh      |
+| `Authentication failed (Request ID...)` from copilot | Copilot CLI session expired           | Run `copilot` interactively, `/login`    |

@@ -1,43 +1,67 @@
-# Patches against ahujasid/blender-mcp `addon.py`
+# Patches against ahujasid/blender-mcp 1.5.5
 
-Base: vendored snapshot 1.5.5 (commit `7636d13`, 2026-01-23).
-Patched here so we can:
-1. Bind the addon's TCP server to a configurable host (default `127.0.0.1`,
-   set `0.0.0.0` to accept LAN connections — useful with Tailscale + socat
-   on a remote host running the MCP server).
-2. Drive both host and port from environment variables (`BLENDER_MCP_HOST`,
-   `BLENDER_MCP_PORT`) at register time, without UI clicks.
-3. Show the bound host in the panel label.
+Base: vendored snapshot 1.5.5 (upstream commit `7636d13`, 2026-01-23).
+Local version stamp: `1.5.5+darkfantasy.1` (in `pyproject.toml`).
 
-Net delta: ~17 lines added, all marked `# PATCH (darkfantasy)`. No upstream
-behavior changes when env vars are unset and the host is left at default.
+This directory is a **complete, installable** copy of the upstream package
+plus our patches. Install with:
 
-## Diff summary (vs upstream addon.py)
+```bash
+uvx --from /home/dodontommy/darkfantasy/patches/blender-mcp blender-mcp
+```
 
-| Site                          | Change                                             |
-|-------------------------------|----------------------------------------------------|
-| `BlenderMCPServer.__init__`   | host/port default to env or fallbacks              |
-| `BLENDERMCP_PT_Panel.draw`    | new `layout.prop(scene, "blendermcp_host")` row    |
-| Same panel — running label    | shows `host:port` instead of just port             |
-| `BLENDERMCP_OT_StartServer`   | passes `scene.blendermcp_host` into the server     |
-| `register()`                  | new `blendermcp_host` StringProperty + env default |
-| `unregister()`                | symmetric `del` of the new property                |
+(All four MCP client configs in this project — workspace `.mcp.json`,
+`.cursor/mcp.json`, `~/.cursor/mcp.json`, `~/.copilot/mcp-config.json` — are
+already wired to use this path.)
 
-## Why not upstream
+## Patch 1 — env-driven host on the addon (Jan/May 2026)
 
-The wrapper has been quiet since Jan 2026 (per
-`docs/research/blender-mcp-deep-dive.md`). We may upstream this patch later;
-for now the project carries it locally.
+Files: `addon.py`.
 
-## What's NOT patched
+Lets the addon bind to a configurable host (default `127.0.0.1`, set
+`0.0.0.0` to accept LAN/Tailscale connections) and read host/port from
+`BLENDER_MCP_HOST` / `BLENDER_MCP_PORT` env vars at register time. Adds a
+"Host" field to the BlenderMCP sidebar panel, and shows `host:port` in the
+running label.
 
-- The MCP server (Python side, `uvx blender-mcp`) still hardcodes
-  `localhost` for its connect target. To talk to a remote addon, either run
-  `socat TCP-LISTEN:9876,bind=127.0.0.1,fork TCP:<remote>:9876` on the
-  server side, or use `ssh -R 9876:localhost:9876` from the addon side.
-  See `orchestrator/README.md` § "Running on a headless host".
-- `mcp__blender__execute_blender_code` is still unsandboxed RCE per
-  `docs/research/blender-mcp-deep-dive.md`. Out of scope for this patch.
-- Hyper3D Rodin is still hardcoded to Gen-1 Sketch + Raw mode. Out of scope
-  for this patch — production hero base mesh should call Rodin Gen-2 via
-  direct API, see `docs/research/ai-3d-generation-2026.md`.
+Net delta: ~17 lines added, all marked `# PATCH (darkfantasy)`.
+
+## Patch 2 — cross-host viewport screenshot (May 2026)
+
+Files: `addon.py`, `src/blender_mcp/server.py`.
+
+The upstream code constructs a temp file path on the **server** host
+(`tempfile.gettempdir()` → `/tmp/...` on Linux) and sends it to the addon to
+write to. When the addon is on a different host (Windows over SSH tunnel),
+`/tmp` does not exist there; `bpy.ops.screen.screenshot_area` silently fails
+and the server raises "Screenshot file was not created".
+
+The patch flips the responsibility: the addon writes to its own local temp
+path, base64-encodes the bytes, returns them in a `data_b64` field, then
+deletes the local temp file. The server decodes the bytes and returns an
+`Image`. No file sharing required between hosts.
+
+Backward compatibility:
+- **New server + new addon** → bytes-in-response (cross-host works).
+- **Old server + new addon** → addon receives a server-supplied filepath; if
+  the parent dir does not exist on the addon's host, addon falls back to
+  local temp + bytes anyway. The addon also writes to the requested path
+  when feasible.
+- **New server + old addon** → broken (old addon errors on missing filepath).
+  The server's error message tells the user to install the patched addon.
+- **Old server + old addon** → unchanged upstream behavior.
+
+Net delta: ~50 lines changed across the two files.
+
+## What's still NOT patched
+
+- `mcp__blender__execute_blender_code` is still unsandboxed RCE on the host
+  running Blender, per `docs/research/blender-mcp-deep-dive.md`. Use
+  tracked `.py` scripts for any production geometry; never let a worker
+  drive arbitrary mutations through this tool.
+- Hyper3D Rodin is still hardcoded to Gen-1 Sketch + Raw mode. For hero
+  character base mesh, call Rodin Gen-2 directly via
+  `scripts/ai_gen/rodin_gen2.py` (not yet written; flag in
+  `skills/ai-3d-mesh-handler`).
+- `mcp__blender__import_generated_asset_hunyuan` accepts arbitrary URLs
+  (SSRF surface). Restrict in ticket prompts.

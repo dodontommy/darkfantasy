@@ -96,14 +96,16 @@ ticket_claim() {
 }
 
 # Verify each declared output path exists. Returns 0 if all present, 1 otherwise.
+# Checks under WORKDIR if set (for worktree tickets), else REPO_ROOT.
 ticket_verify_outputs() {
   local file=$1
+  local check_dir="${WORKDIR:-$REPO_ROOT}"
   local missing=0
   while IFS= read -r out; do
     [[ -z "$out" ]] && continue
-    local path="$REPO_ROOT/$out"
+    local path="$check_dir/$out"
     if [[ ! -e "$path" ]]; then
-      log "missing output: $out"
+      log "missing output: $out (checked in $check_dir)"
       missing=$((missing + 1))
     fi
   done < <(fm_list "$file" outputs)
