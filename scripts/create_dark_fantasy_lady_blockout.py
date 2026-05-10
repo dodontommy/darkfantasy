@@ -1,15 +1,21 @@
 import math
+import sys
 from pathlib import Path
 
 import bpy
 from mathutils import Vector
 
-
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parent
 OUT_DIR = ROOT / "outputs"
 RENDER_DIR = OUT_DIR / "renders"
 BLEND_PATH = OUT_DIR / "nocturne_matriarch_blockout.blend"
 RENDER_PATH = RENDER_DIR / "nocturne_matriarch_blockout.png"
+
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from parts import build_bodice
 
 
 def clear_scene():
@@ -99,10 +105,7 @@ def build_character():
     parts.append(add_uv_sphere("torso base", (0, 0, 2.55), (0.38, 0.22, 0.58), skin))
     parts.append(add_uv_sphere("hip base", (0, 0, 1.83), (0.42, 0.24, 0.28), skin))
 
-    bodice = add_cone("black steel bodice", (0, -0.012, 2.55), 0.36, 0.23, 0.92, steel, 48)
-    parts.append(rotate(bodice, 0, 0, 180))
-    waist = add_cylinder("gold waist cincher", (0, -0.005, 2.08), 0.31, 0.12, gold, 48)
-    parts.append(rotate(waist, 90, 0, 0))
+    parts.extend(build_bodice(steel, gold, gem))
 
     parts.append(add_uv_sphere("left pauldron", (-0.47, 0, 2.93), (0.24, 0.16, 0.13), steel))
     parts.append(add_uv_sphere("right pauldron", (0.47, 0, 2.93), (0.24, 0.16, 0.13), steel))
@@ -134,8 +137,6 @@ def build_character():
     for side, sx in [("left", -1), ("right", 1)]:
         horn = add_cone(f"{side} crown horn", (sx * 0.18, -0.015, 3.98), 0.04, 0.0, 0.62, gold, 18)
         parts.append(rotate(horn, 0, sx * 22, 0))
-
-    parts.append(add_uv_sphere("crimson chest focus", (0, -0.235, 2.62), (0.075, 0.025, 0.105), gem, 24, 12))
 
     for obj in parts:
         for old in obj.users_collection:
