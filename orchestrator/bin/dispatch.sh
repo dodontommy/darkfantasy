@@ -18,17 +18,25 @@ case "$TICKET" in
   *) die "ticket is in done/failed, not dispatchable: $TICKET" ;;
 esac
 
-WC=$(fm_get "$TICKET" worker_class)
-[[ -n "$WC" ]] || die "ticket missing worker_class: $TICKET"
+LOGICAL_WC=$(fm_get "$TICKET" worker_class)
+[[ -n "$LOGICAL_WC" ]] || die "ticket missing worker_class: $TICKET"
+
+# Default-window selection follows the PHYSICAL worker class, so a ticket
+# remapped to claude-cli ends up in a claude-cli window, not a copilot window.
+load_workers_conf
+PHYSICAL_WC=$(resolve_worker "$LOGICAL_WC")
+[[ "$PHYSICAL_WC" == "$LOGICAL_WC" ]] || \
+  log "remap: $LOGICAL_WC -> $PHYSICAL_WC (per workers.conf)"
 
 if [[ -z "$WIN" ]]; then
-  case "$WC" in
+  case "$PHYSICAL_WC" in
     copilot)     WIN="worker-cop-1" ;;
     cursor)      WIN="worker-cur-1" ;;
     cursor-mcp)  WIN="worker-mcp-1" ;;
     cursor-ask)  WIN="worker-cur-1" ;;
+    claude-cli)  WIN="worker-cli-1" ;;
     shell)       WIN="worker-cur-1" ;;
-    *) die "unknown worker_class for default window: $WC" ;;
+    *) die "unknown physical worker_class for default window: $PHYSICAL_WC" ;;
   esac
 fi
 
@@ -41,6 +49,9 @@ if ! tmux list-windows -t darkfantasy -F '#{window_name}' | grep -qx "$WIN"; the
   "$SELF_DIR/spawn-worker.sh" "$WIN"
 fi
 
-CMD="$ORCH_ROOT/bin/run-worker.sh $WC $TID"
+# Always pass the LOGICAL worker_class — run-worker.sh re-resolves to the
+# physical class internally. This keeps the audit trail consistent: tickets
+# always say what role they wanted, even when the role was remapped.
+CMD="$ORCH_ROOT/bin/run-worker.sh $LOGICAL_WC $TID"
 log "dispatching $TID -> darkfantasy:$WIN ($CMD)"
 tmux send-keys -t "darkfantasy:$WIN" "$CMD" Enter

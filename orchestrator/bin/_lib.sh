@@ -11,7 +11,27 @@ ORCH_LOCKS="$ORCH_ROOT/locks"
 ORCH_LOGS="$ORCH_ROOT/logs"
 ORCH_WORKTREES="$ORCH_ROOT/worktrees"
 ORCH_TEMPLATES="$ORCH_ROOT/templates"
+ORCH_WORKERS_CONF="$ORCH_ROOT/workers.conf"
 MCP_LOCK="$ORCH_LOCKS/blender-mcp.lock"
+
+# Source the worker config (defines REMAP_* and CLAUDE_CLI_MODEL).
+# Idempotent — safe to call from any script that needs them.
+load_workers_conf() {
+  if [[ -f "$ORCH_WORKERS_CONF" ]]; then
+    # shellcheck disable=SC1090
+    source "$ORCH_WORKERS_CONF"
+  fi
+}
+
+# Resolve a logical worker_class (as declared in a ticket) to the physical
+# worker_class that should actually run, honoring REMAP_* in workers.conf.
+# Hyphens in the input are normalized to underscores for variable lookup.
+resolve_worker() {
+  local logical=$1
+  local key="REMAP_${logical//-/_}"
+  local actual="${!key:-$logical}"
+  echo "$actual"
+}
 
 ts() { date -u +%Y%m%dT%H%M%SZ; }
 

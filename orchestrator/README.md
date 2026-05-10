@@ -54,14 +54,38 @@ orchestrator/
 
 ## Worker classes
 
-| Class          | CLI invoked                                     | MCP? | Use for                                              |
-|----------------|-------------------------------------------------|------|------------------------------------------------------|
-| `copilot`      | `copilot -p ... --allow-all-tools --add-dir ...`| no   | Authoring/refactoring `.py`, lint, manifest checks   |
-| `cursor`       | `agent -p ... --yolo --print`                   | no   | Same domain as copilot; alternative engine           |
-| `cursor-mcp`   | `agent -p ... --yolo --approve-mcps --print`    | YES  | Live Blender editing, viewport screenshots, AI-gen   |
-| `cursor-ask`   | `agent -p ... --mode ask --print`               | no   | Read-only critique (renders, code review)            |
-| `shell`        | `bash` extracting `## Run` section              | no   | Pure deterministic CLI runs (`blender --background`) |
-| `claude-self`  | dispatched in this Claude session, not tmux     | no   | Architecture, taste, merging, talking to user        |
+| Class          | CLI invoked                                       | MCP? | Use for                                              |
+|----------------|---------------------------------------------------|------|------------------------------------------------------|
+| `copilot`      | `copilot -p ... --allow-all-tools --add-dir ...`  | no   | Authoring/refactoring `.py`, lint, manifest checks   |
+| `cursor`       | `agent -p --yolo --output-format text ...`        | no   | Same domain as copilot; alternative engine           |
+| `cursor-mcp`   | `agent -p --yolo --approve-mcps ...`              | YES  | Live Blender editing, viewport screenshots, AI-gen   |
+| `cursor-ask`   | `agent -p --mode ask ...`                         | no   | Read-only critique (renders, code review)            |
+| `claude-cli`   | `claude --print --model <m> --add-dir ...`        | no   | Anthropic-quota work; model from `CLAUDE_CLI_MODEL`  |
+| `shell`        | `bash` extracting `## Run` section                | no   | Pure deterministic CLI runs (`blender --background`) |
+| `claude-self`  | dispatched in this Claude session, not tmux       | no   | Architecture, taste, merging, talking to user        |
+
+### Selecting workers per pipeline run
+
+Tickets declare a *logical* worker class. The actual CLI that runs is resolved
+at dispatch time by the `REMAP_*` table in `orchestrator/workers.conf`. This
+lets you reshape an entire pipeline run without editing tickets:
+
+```
+# orchestrator/workers.conf
+REMAP_copilot=copilot          # default: identity mapping
+REMAP_cursor_ask=claude-cli    # route critique through claude --print
+CLAUDE_CLI_MODEL=opus          # ...with Opus when critique runs
+```
+
+Edit `workers.conf` directly, or run the interactive helper:
+
+```bash
+orchestrator/bin/configure-pipeline.sh
+```
+
+`cursor-mcp` is the only physical class wired to the `--approve-mcps` flag, so
+remapping a `cursor-mcp` ticket to a non-MCP worker will fail by design — keep
+MCP tickets on `cursor-mcp`.
 
 ## Ticket lifecycle
 
@@ -112,6 +136,26 @@ Window 1 (`blender`) requires one manual step: in the BlenderMCP sidebar, click
 *Connect to MCP server*. This cannot be automated without modifying the upstream addon.
 A future TODO is to drop a `~/.config/blender/4.x/scripts/startup/auto_start_mcp.py`
 that flips the toggle on Blender startup.
+
+### Running on a headless host
+
+This project's primary host is headless Linux (no DISPLAY). Implications:
+
+- **Non-MCP work is fine.** All `copilot`, `cursor`, `cursor-ask`, `claude-cli`,
+  and `shell` tickets work without a Blender GUI. The substrate runs without
+  tmux too — invoke `run-worker.sh` directly.
+- **`cursor-mcp` requires a live Blender GUI on `localhost:9876`.** Two options:
+  1. **Xvfb on this box**: `xvfb-run -a blender` in the `blender` window. Slow,
+     and `get_viewport_screenshot` outputs a black frame unless GPU is wired
+     through EGL (see `docs/research/headless-blender-2026.md`).
+  2. **Remote Blender via SSH reverse tunnel.** Run Blender on a Windows or
+     macOS machine, then from that machine:
+     ```
+     ssh -R 9876:localhost:9876 user@<linux-host>
+     ```
+     The Linux-side `uvx blender-mcp` then connects to `localhost:9876`, which
+     is the tunnel, which is the remote Blender. The `flock` lock still works
+     (it lives on Linux). Recommended for any real MCP work from this host.
 
 ## Source-of-truth promotion (MCP → script)
 

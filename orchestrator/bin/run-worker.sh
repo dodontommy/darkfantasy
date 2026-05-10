@@ -10,12 +10,19 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SELF_DIR/_lib.sh"
 
 [[ $# -eq 2 ]] || die "usage: run-worker.sh <worker_class> <ticket_id>"
-WC=$1
+LOGICAL_WC=$1
 TID=$2
 
+# Resolve the physical worker class through workers.conf REMAP_* table.
+load_workers_conf
+WC=$(resolve_worker "$LOGICAL_WC")
+if [[ "$WC" != "$LOGICAL_WC" ]]; then
+  log "remap: $LOGICAL_WC -> $WC (per workers.conf)"
+fi
+
 case "$WC" in
-  copilot|cursor|cursor-mcp|cursor-ask|shell) ;;
-  *) die "unknown worker_class: $WC" ;;
+  copilot|cursor|cursor-mcp|cursor-ask|claude-cli|shell) ;;
+  *) die "unknown physical worker_class: $WC (logical was $LOGICAL_WC)" ;;
 esac
 
 START_TS=$(ts)
@@ -112,6 +119,16 @@ EOF
 set -euo pipefail
 cd "$WORKDIR"
 exec agent -p --mode ask --output-format text "\$(cat "$PROMPT_FILE")"
+EOF
+    ;;
+  claude-cli)
+    : "${CLAUDE_CLI_MODEL:=sonnet}"
+    log "claude-cli model: $CLAUDE_CLI_MODEL"
+    cat > "$INNER" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$WORKDIR"
+exec claude --print --model "$CLAUDE_CLI_MODEL" --add-dir "$WORKDIR" "\$(cat "$PROMPT_FILE")"
 EOF
     ;;
   shell)
